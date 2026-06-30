@@ -1,0 +1,21 @@
+# R artifacts
+.Rproj.user
+.RData
+.Rhistory
+.Ruserdata
+
+# Study outputs (don't commit results data)
+results/**/*.csv
+
+# renv library (only commit lockfile)
+renv/library/
+renv/staging/
+renv/local/
+
+# OS files
+*.DS_Store
+Thumbs.db
+
+# Docker (generated files)
+Dockerfile
+.dockerignore
