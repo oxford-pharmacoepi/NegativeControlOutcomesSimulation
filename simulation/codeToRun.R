@@ -42,8 +42,8 @@ parameters <- tibble(
 fmt <- paste0("cov_%0", ceiling(numberCovariates[2]),"i")
 fmtnco <- paste0("nco_%0", ceiling(numberCovariates[2]),"i")
 
-# result <- parameters |>
-#   pmap(\(sample_size, treatment_prevalence, number_covariates, unmeasured, outcome_prevalence, treatment_effect, nco) {
+result <- parameters |>
+  pmap(\(sample_size, treatment_prevalence, number_covariates, unmeasured, outcome_prevalence, treatment_effect, nco) {
     ts <- Sys.time()
     n <- sample_size
     
@@ -183,8 +183,8 @@ fmtnco <- paste0("nco_%0", ceiling(numberCovariates[2]),"i")
     # time
     result$time <- as.numeric(difftime(time1 = Sys.time(), time2 = ts))
     
-  #   return(result)
-  # }) |>
-  # bind_rows()
+    return(result)
+  }) |>
+  bind_rows()
 
 write_csv(x = result, file = "simulations.csv")
