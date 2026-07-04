@@ -73,8 +73,11 @@ result <- parameters |>
     fn <- \(x) mean(1 / (1 + exp(-(x + p_treatment)))) - treatment_prevalence
     delta <- uniroot(fn, interval = c(-100, 100))$root
     p_treatment <- 1 / (1 + exp(-(delta + p_treatment)))
-    hist(p_treatment)
     treatment <- if_else(runif(n = n) < p_treatment, 1, 0)
+    
+    if (length(unique(treatment)) != 2) {
+      return(NULL)
+    }
     
     # covariates -> outcome
     cov <- rnorm(n = number_covariates, sd = covariateSd)
@@ -84,7 +87,6 @@ result <- parameters |>
     fn <- \(x) mean(1 / (1 + exp(-(x + p_outcome)))) - outcome_prevalence
     delta <- uniroot(fn, interval = c(-100, 100))$root
     p_outcome <- 1 / (1 + exp(-(delta + p_outcome)))
-    hist(p_outcome)
     outcome <- if_else(runif(n = n) < p_outcome, 1, 0)
     
     # negative control outcomes
@@ -104,30 +106,34 @@ result <- parameters |>
     
     # crude coefficient
     x <- tibble(outcome = outcome, treatment = treatment)
-    crude <- glm(outcome ~ treatment, data = x) |>
+    crude <- glm(outcome ~ treatment, data = x, family = binomial(link = "logit")) |>
       tidy() |>
       filter(term == "treatment")
     result$crude_error <- crude$estimate - treatment_effect
     result$crude_sd <- crude$std.error
     
     # lasso regression
-    cv_fit <- cv.glmnet(
-      x = as.matrix(covariates),
-      y = outcome,
-      family = "binomial",
-      alpha = 1
-    )
-    lasso_coef <- coef(cv_fit, s = "lambda.min")
-    covs <- rownames(lasso_coef)[as.vector(lasso_coef != 0)]
-    covs <- covs[startsWith(covs, "cov_")]
+    if (ncol(covariates) > 0) {
+      cv_fit <- cv.glmnet(
+        x = as.matrix(covariates),
+        y = treatment,
+        family = "binomial",
+        alpha = 1
+      )
+      lasso_coef <- coef(cv_fit, s = "lambda.min")
+      covs <- rownames(lasso_coef)[as.vector(lasso_coef != 0)]
+      covs <- covs[startsWith(covs, "cov_")]
+    } else {
+      covs <- character()
+    }
     
     # weights
     if (length(covs) > 0) {
       formula <- paste0("treatment ~ ", paste0(covs, collapse = " + "))
-      fit <- glm(formula = formula, family = "binomial", data = bind_cols(x, covariates))
+      fit <- glm(formula = formula, family = binomial(link = "logit"), data = bind_cols(x, covariates))
       prob <- predict(fit, type = "response")
     } else {
-      prob <- 0.5
+      prob <- mean(treatment)
     }
     x <- x |>
       mutate(
@@ -136,7 +142,7 @@ result <- parameters |>
       )
     
     # weighted coefficient
-    weighted <- glm(outcome ~ treatment, data = x, weights = weight) |>
+    weighted <- glm(outcome ~ treatment, data = x, weights = weight, family = binomial(link = "logit")) |>
       tidy() |>
       filter(term == "treatment")
     result$weighted_error <- weighted$estimate - treatment_effect
@@ -146,31 +152,31 @@ result <- parameters |>
     ncos <- nco |>
       map(\(out) {
         x$outcome <- out
-        glm(outcome ~ treatment, data = x, weights = weight) |>
+        glm(outcome ~ treatment, data = x, weights = weight, family = binomial(link = "logit")) |>
           tidy() |>
           filter(term == "treatment") |>
           select("estimate", "std" = "std.error")
       }) |>
       bind_rows()
-    model <- fitSystematicErrorModel(ncos$estimate, ncos$std, rep(0, length(nco)))
+    model <- fitSystematicErrorModel(ncos$estimate, ncos$std, rep(0, nrow(ncos)))
     result$nco_model_mean_intercept <- model[1]
     result$nco_model_mean_slope <- model[2]
     result$nco_model_sd_intercept <- model[3]
     result$nco_model_sd_slope <- model[4]
     calibrated <- calibrateConfidenceInterval(weighted$estimate, weighted$std.error, model)
-    result$calibrated_error <- as.numeric(calibrated[1]) - treatment_effect
-    result$calibrated_sd <- as.numeric(calibrated[4])
+    result$calibrated_error <- calibrated$logRr - treatment_effect
+    result$calibrated_sd <- calibrated$seLogRr
     
     # adjusted model
     x <- x |>
       bind_cols(nco)
     formula <- paste0("outcome ~ treatment + ", paste0(colnames(nco), collapse = " + "))
-    crude_adjusted <- glm(formula = formula, data = x) |>
+    crude_adjusted <- glm(formula = formula, data = x, family = binomial(link = "logit")) |>
       tidy() |>
       filter(term == "treatment")
     result$crude_adjusted_error <- crude_adjusted$estimate - treatment_effect
     result$crude_adjusted_sd <- crude_adjusted$std.error
-    weighted_adjusted <- glm(formula = formula, data = x, weights = weight) |>
+    weighted_adjusted <- glm(formula = formula, data = x, weights = weight, family = binomial(link = "logit")) |>
       tidy() |>
       filter(term == "treatment")
     result$weighted_adjusted_error <- weighted_adjusted$estimate - treatment_effect
