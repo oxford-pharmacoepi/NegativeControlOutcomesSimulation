@@ -213,7 +213,7 @@ result <- parameters |>
     result$time <- as.numeric(difftime(time1 = Sys.time(), time2 = ts))
 
     return(result)
-  }) |>
+  }, .progress = "Running simulation") |>
   bind_rows()
 
 write_csv(x = result, file = "simulations.csv")
