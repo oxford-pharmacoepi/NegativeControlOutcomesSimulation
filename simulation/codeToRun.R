@@ -16,6 +16,7 @@ outcomePrevalence <- c(-3, -1) # log
 treatmentEffect <- c(-1, 1) # lin
 numberNCO <- c(0, 3) # log
 covariateSd <- c(0, 0.3) # lin
+covariatePrev <- c(log(5)/log(10), 3) # log
 
 numberSimulations <- 10
 minimumTreatmentPerClassForLasso <- 4
@@ -26,8 +27,12 @@ rand <- function(x, range) {
 rand10 <- function(x, range) {
   10 ** (range[1] + (range[2] - range[1]) * x)
 }
+randPrevalence <- function(n, lambda) {
+  u <- runif(n)
+  -log(1 - u * (1 - exp(-lambda))) / lambda
+}
 
-parameters <- randomLHS(numberSimulations, 8)
+parameters <- randomLHS(numberSimulations, 9)
 
 parameters <- tibble(
   sample_size = round(rand10(parameters[,1], sampleSize)),
@@ -38,14 +43,15 @@ parameters <- tibble(
   treatment_effect = rand(parameters[,6], treatmentEffect),
   nco = round(rand10(parameters[,7], numberNCO)),
   covariate_sd = rand(parameters[,8], covariateSd),
+  covariate_prev = rand10(parameters[,9], covariatePrev)
 ) |>
-  filter(sample_size > 2 * number_covariates)
+  filter(.data$sample_size > 2 * .data$number_covariates)
 
 fmt <- paste0("cov_%0", ceiling(numberCovariates[2]),"i")
 fmtnco <- paste0("nco_%0", ceiling(numberCovariates[2]),"i")
 
 result <- parameters |>
-  pmap(\(sample_size, treatment_prevalence, number_covariates, unmeasured, outcome_prevalence, treatment_effect, nco, covariate_sd) {
+  pmap(\(sample_size, treatment_prevalence, number_covariates, unmeasured, outcome_prevalence, treatment_effect, nco, covariate_sd, covariate_prev) {
     ts <- Sys.time()
     n <- sample_size
 
@@ -58,11 +64,12 @@ result <- parameters |>
       outcome_prevalence = outcome_prevalence,
       treatment_effect = treatment_effect,
       nco = nco,
-      covariate_sd = covariate_sd
+      covariate_sd = covariate_sd,
+      covariate_prev = 1/covariate_prev
     )
 
     # covariates
-    covariates <- rep(0.2, number_covariates) |>
+    covariates <- randPrevalence(n = number_covariates, lambda = covariate_prev) |>
       imap(\(p, i) {
         tibble(!!sprintf(fmt, i) := if_else(runif(n = n) < p, 1, 0))
       }) |>
@@ -150,8 +157,6 @@ result <- parameters |>
     } else {
       prob <- mean(treatment)
     }
-    
-    fit |> tidy() |> pull("estimate") |> sd()
     
     x <- x |>
       mutate(
